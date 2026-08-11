@@ -1,0 +1,85 @@
+/*
+ * heater_pid.c: ПИД-регулятор температуры датчика.
+ *
+ * Восстановленная формула полностью совпадает с опубликованным описанием
+ * регулятора LC-1:
+ *
+ *      pfactor(n) = error(n) = target - measured
+ *      ifactor(n) = ifactor(n-1) + error(n)          (с ограничением +/-75)
+ *      dfactor(n) = error(n) - error(n-1)
+ *      Vheat(eff) = NominalVeff - (Kp*p + Ki*i + Kd*d)
+ *
+ * Знак: измеряемая величина - сопротивление ячейки, у керамики оно падает
+ * с ростом температуры. Если measured < target, датчик перегрет, error > 0,
+ * воздействие вычитается из NominalVeff и нагрев уменьшается. Сходится.
+ *
+ * ВАЖНО ОБ ИМЕНАХ ПЛАВАЮЩИХ ФУНКЦИЙ. В исходных материалах две обёртки
+ * названы вручную и, судя по потоку данных, ПЕРЕПУТАНЫ МЕСТАМИ:
+ *
+ * Ниже используются нейтральные имена, чтобы не тащить ошибку дальше.
+ */
+#include "lc1.h"
+
+void heater_pid_step(void)
+{
+    int16_t err;
+    int16_t prev_err;
+    int16_t deriv;
+    int16_t vheat;
+    float acc;
+
+    /*
+     * Гейт по счётчику g_var_0241
+     * Регулятор работает, пока значение меньше 0x21; heater_cal_step()
+     * однозначно не следует, имя оставлено сырым.
+     */
+    if ((int8_t)g_var_0241 >= 0x21)
+        return;
+
+    err = (int16_t)((int16_t)g_heat_target - g_cell_r_meas);
+
+    prev_err       = g_pid_prev_err;
+    g_pid_prev_err = err;
+
+    /*
+     * --- Интегратор,
+     * Суммарный эффект - обычное `integ += err` при err != 0; ветви
+     * сохранены как есть, чтобы не менять код.
+     */
+    if (err > 0)
+        g_pid_integ += err;
+    if (err < 0)
+        g_pid_integ += err;
+
+    /*
+     * Ограничение интегратора +/-75
+     * (Во внешнем описании отмечено, что ограничение интегратора появилось
+     *  только в LC-2; в этой прошивке v1.20 оно уже есть.)
+     */
+    {
+        int16_t a = g_pid_integ;
+        if (a < 0)
+            a = (int16_t)(-a);
+        if (a >= 76) {
+            if (g_pid_integ < 0)
+                g_pid_integ = -75;
+            else
+                g_pid_integ = 75;
+        }
+    }
+
+    /* --- Сумма воздействия в плавающей точке --- */
+    acc = (float)(int32_t)err * 20.0f;
+    acc = acc + (float)(int32_t)g_pid_integ;
+
+    deriv = (int16_t)((int16_t)(err - prev_err) * 10);
+    acc   = acc + (float)(int32_t)deriv;
+
+    vheat = (int16_t)((int16_t)g_nominal_veff - (int16_t)acc);
+
+    if (vheat < 4)
+        vheat = 4;
+
+    heater_duty_update(vheat, 1);
+    g_pid_out = vheat;
+}

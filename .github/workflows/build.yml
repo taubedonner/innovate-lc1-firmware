@@ -1,0 +1,142 @@
+name: build
+
+# Собирается двумя компиляторами:
+#   modern - современный avr-gcc, проверка на чистую компиляцию;
+#   legacy - avr-gcc 3.4.3 (комплектация WinAVR-20050214), эталонная сборка.
+# Релиз создаётся вручную: Actions -> build -> Run workflow -> указать тег.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag for a release (e.g. v1.20rc4-r1). Leave empty to just build."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  modern:
+    name: avr-gcc (current)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-avr binutils-avr avr-libc
+
+      - name: Version
+        run: avr-gcc --version | head -1
+
+      - name: Build (warnings are errors)
+        run: make EXTRA_CFLAGS=-Werror
+
+      - name: Disassembly
+        run: make disasm
+
+      - name: Size
+        run: |
+          avr-size build/lc1.elf | tee build/size.txt
+          avr-nm build/lc1.elf | grep ' T __vector_' | awk '{print $3}' | sort \
+              > build/vectors.txt
+          cat build/vectors.txt
+
+      - name: Interrupt vectors must match the original image
+        run: diff -u tools/expected-vectors.txt build/vectors.txt
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lc1-modern
+          path: |
+            build/lc1.hex
+            build/lc1.eep
+            build/lc1.elf
+            build/lc1.lst
+            build/lc1.map
+            build/size.txt
+          if-no-files-found: error
+
+  legacy:
+    name: avr-gcc 3.4.3 (WinAVR-20050214)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Debian sarge i386 запускается на amd64-раннере без эмуляции.
+      # Пакеты тянутся с archive.debian.org, поэтому две попытки.
+      - name: Build the 2005 toolchain image
+        run: |
+          docker build --platform linux/386 -t lc1-oldgcc tools/oldgcc || \
+          docker build --platform linux/386 -t lc1-oldgcc tools/oldgcc
+
+      - name: Build firmware
+        run: sh tools/build-oldgcc.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lc1-legacy
+          path: |
+            build-oldgcc/lc1-oldgcc.hex
+            build-oldgcc/lc1-oldgcc.elf
+            build-oldgcc/lc1-oldgcc.lst
+            build-oldgcc/size.txt
+            build-oldgcc/vectors.txt
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [modern, legacy]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+
+      - name: Collect files
+        run: |
+          mkdir -p out
+          cp dist/lc1-legacy/lc1-oldgcc.* out/
+          cp dist/lc1-legacy/size.txt out/size-oldgcc.txt
+          cp dist/lc1-modern/lc1.* out/
+          cp dist/lc1-modern/size.txt out/size-modern.txt
+          ls -l out
+
+      - name: Release notes
+        run: |
+          {
+            echo "Реконструкция прошивки Innovate LC-1 v1.20 RC4, сборка ${{ github.event.inputs.release_tag }}."
+            echo
+            echo "* \`lc1-oldgcc.*\` - эталонная сборка avr-gcc 3.4.3 (WinAVR-20050214)."
+            echo "* \`lc1.*\` - сборка современным avr-gcc, для проверки и отладки."
+            echo
+            echo "На живом приборе код не проверялся. Перед прошивкой прочитайте раздел \"Загрузчик\" в README: полное стирание кристалла уничтожит заводской bootloader, которого в этом проекте нет."
+            echo
+            echo "Размеры (оригинальный образ: 20 710 байт кода):"
+            echo '```'
+            echo "avr-gcc 3.4.3"
+            cat out/size-oldgcc.txt
+            echo "avr-gcc current"
+            cat out/size-modern.txt
+            echo '```'
+          } > notes.md
+          cat notes.md
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.event.inputs.release_tag }}" \
+             --title "LC-1 ${{ github.event.inputs.release_tag }}" \
+             --notes-file notes.md \
+             out/*

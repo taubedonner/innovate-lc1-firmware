@@ -1,0 +1,10 @@
+build/
+build-oldgcc/
+*.o
+*.d
+*.elf
+*.hex
+*.eep
+*.map
+*.lst
+.DS_Store

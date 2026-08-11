@@ -1,0 +1,61 @@
+# LC-1 firmware. Ширина 120 колонок.
+# Стиль близок к тому, что даёт avr-gcc-проектам привычный вид:
+# отступ 4 пробела, скобка функции на новой строке, остальные - на той же.
+---
+Language:        Cpp
+BasedOnStyle:    LLVM
+
+ColumnLimit:     120
+IndentWidth:     4
+TabWidth:        4
+UseTab:          Never
+ContinuationIndentWidth: 4
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction:   true
+  AfterStruct:     false
+  AfterEnum:       false
+  AfterUnion:      false
+  AfterControlStatement: Never
+  AfterCaseLabel:  false
+  BeforeElse:      false
+  BeforeWhile:     false
+  IndentBraces:    false
+  SplitEmptyFunction: false
+
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+
+# Таблицы констант и блоки присваиваний выровнены - так их проще
+# сверять с дизассемблером, ради этого выравнивание и включено.
+AlignConsecutiveAssignments:
+  Enabled:         true
+  AcrossEmptyLines: false
+  AcrossComments:  false
+# Выравнивание объявлений выключено: длинные типы разгоняют строку
+# и мешают читать локальные переменные.
+AlignConsecutiveDeclarations:
+  Enabled:         false
+AlignTrailingComments:
+  Kind:            Always
+  OverEmptyLines:  0
+AlignEscapedNewlines: Left
+AlignOperands:   Align
+AlignAfterOpenBracket: Align
+
+IndentCaseLabels: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+QualifierAlignment: Leave
+SpaceAfterCStyleCast: false
+SpacesBeforeTrailingComments: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+SortIncludes:    Never
+ReflowComments:  false
+InsertNewlineAtEOF: true
