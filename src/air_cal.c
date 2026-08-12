@@ -35,12 +35,12 @@ void air_cal_step(void)
 {
     uint16_t n;
 
-    if (g_state != 8) {
+    if (g_state != ST_RUN) {
         g_air_cal_request = 0;
         return;
     }
 
-    g_status = 2;
+    g_status = STATUS_AIR_CAL;
 
     if (g_var_0241 == 0) {
         g_t1_meas  = 0;

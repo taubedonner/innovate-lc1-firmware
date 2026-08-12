@@ -9,6 +9,13 @@
  *   3) полученное Rpump сохраняется в EEPROM как targetRpump и дальше служит
  *      уставкой регулятора в рабочем режиме - Rpump меряется без возмущения
  *      основного измерения, в отличие от Rnernst.
+ *
+ * 80 для LSU 4.2 совпадает с паспортным Ri этого датчика. У LSU 4.9 паспорт
+ * Bosch (Y 258 E00 015e, п.1.3) даёт Ri = 300 Ом, но с оговоркой "измерено
+ * переменным током 1...4 кГц при токе не выше 250 мкА", а здесь замер
+ * делается коротким импульсом постоянной нагрузки. Это разные измерения
+ * одной величины, поэтому 200 против 300 само по себе не дефект.
+ * Проверяется только на приборе, см. неопределённости.
  */
 #include "lc1.h"
 
@@ -48,7 +55,7 @@ uint8_t heater_cal_step(void)
      */
     if ((int16_t)(g_vheat_ramp / 200) != 0) {
         int16_t v      = 9 - (int16_t)(g_vheat_ramp / 200);
-        g_status       = 5;
+        g_status       = STATUS_HEATER_CAL;
         g_report_value = (uint16_t)v;
         countdown_low  = (v < 2) ? 1 : 0;
     } else {
@@ -69,13 +76,18 @@ uint8_t heater_cal_step(void)
      */
     if (g_cal_sample_cnt == 25) {
         err = heater_resistance_step();
-        if (err != 0) {
-            heater_duty_update(0, 0);
+        if (err != ERR_NONE) {
+            heater_duty_update(0, DUTY_BY_IHEAT);
             g_heater_cal_active = 0;
             return err;
         }
 
-        /* Среднее Rnernst. Делитель для NTK - 5, для остальных - 25. */
+        /*
+         * Среднее Rnernst. Делитель для LSU 4.2 - 5, для остальных - 25,
+         * для того же типа тоже увеличена впятеро (400 вместо 80), так что
+         * пара "делитель 5 + уставка 400" эквивалентна честному среднему
+         * с уставкой 80.
+         */
         if (g_sensor_type == 1)
             g_cell_r_meas = (int16_t)(g_rnernst_acc / 5);
         else
@@ -141,19 +153,19 @@ uint8_t ntk_heater_cal_step(void)
     if (g_var_0212 == 0) {
         g_var_0212   = 1;
         g_vheat_ramp = 0;
-        heater_duty_update(2150, 1);
+        heater_duty_update(2150, DUTY_BY_VBAT);
         return 0;
     }
 
     if (g_adc_data_ready == 0)
         return 0;
 
-    heater_duty_update(2150, 1);
+    heater_duty_update(2150, DUTY_BY_VBAT);
 
     err = heater_resistance_step();
-    if (err != 0) {
+    if (err != ERR_NONE) {
         g_var_0212 = 0;
-        heater_duty_update(0, 0);
+        heater_duty_update(0, DUTY_BY_IHEAT);
         return err;
     }
 
@@ -162,7 +174,7 @@ uint8_t ntk_heater_cal_step(void)
 
     /* Обратный отсчёт 9...1 для индикации. Деление на 40 вызывается ДВАЖДЫ */
     if ((uint16_t)(n / 40) != 0) {
-        g_status       = 5;
+        g_status       = STATUS_HEATER_CAL;
         g_report_value = (uint16_t)(9 - (n / 40));
     }
 

@@ -47,21 +47,21 @@ int16_t aout_scale(uint8_t ch)
 
 void report_value_out(int16_t value, int16_t mode)
 {
-    if (mode == 0) {
+    if (mode == AOUT_NOW) {
         cli();
         g_aout0_timer = 0;
         g_aout1_timer = 0;
         sei();
 
-    } else if (mode == 2) {
+    } else if (mode == AOUT_WARMUP) {
         dac_write(g_aout_cfg[0].out_warmup, 0);
         dac_write(g_aout_cfg[1].out_warmup, 1);
         return;
-    } else if (mode == 3) {
+    } else if (mode == AOUT_ERROR) {
         dac_write(g_aout_cfg[0].out_error, 0);
         dac_write(g_aout_cfg[1].out_error, 1);
         return;
-    } else if (mode != 1) {
+    } else if (mode != AOUT_ACC) {
         return;
     }
 

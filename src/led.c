@@ -15,7 +15,7 @@ void led_task(void)
         return;
     g_tick_flag_led = 0;
 
-    if (g_error_code != 0) {
+    if (g_error_code != ERR_NONE) {
         /* ============ Есть ошибка: мигаем её кодом ==================== */
 
         if (g_led_prev_error != g_error_code) {
@@ -62,11 +62,11 @@ void led_task(void)
         g_led_prev_state = g_state;
     }
 
-    if ((int8_t)g_state >= 6) {
-        if ((int8_t)g_state >= 8) {
-            if (g_state != 8)
+    if ((int8_t)g_state >= ST_HEATER_CAL) {
+        if ((int8_t)g_state >= ST_RUN) {
+            if (g_state != ST_RUN)
                 goto slow_blink;
-            /* --- Рабочий режим (g_state == 8): ровное свечение ------- * */
+            /* --- Рабочий режим (g_state == ST_RUN): ровное свечение ------- * */
             if (g_air_cal_request != 0)
                 PORTB &= ~(1 << P_CAL_PU_EN);
             else

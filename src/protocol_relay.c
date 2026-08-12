@@ -52,7 +52,7 @@ uint8_t protocol_task(void)
      * ==================================================================
      * ==================================================================
      */
-    case 0:
+    case RELAY_IDLE:
         /*
          * Байт заголовка засчитывается, только если предыдущий байт был
          * байтом ДАННЫХ (бит7 = 0). Оба байта заголовка имеют бит7 = 1,
@@ -65,7 +65,7 @@ uint8_t protocol_task(void)
 
         if ((c & 0xA2) == 0xA2) {
             /* Заголовок ISP2: биты 15, 13 и 9 слова (они же биты 7, 5, 1 */
-            g_relay_state = 1;
+            g_relay_state = RELAY_HDR2;
 
             /* Бит0 первого байта - старший (восьмой) бит длины. */
             g_relay_len  = (uint16_t)((c & 1) << 7);
@@ -82,7 +82,7 @@ uint8_t protocol_task(void)
              * always 0". Пакет LM-1 - 8 слов, то есть 16 байт, один из
              */
             g_relay_len   = 15;
-            g_relay_state = 3;
+            g_relay_state = RELAY_BODY_ISP1;
             g_relay_hdr0  = c;
 
         } else {
@@ -94,10 +94,10 @@ uint8_t protocol_task(void)
      * ==================================================================
      * ==================================================================
      */
-    case 1:
+    case RELAY_HDR2:
         /* Оба байта заголовка обязаны иметь бит7. Иначе кадр битый - */
         if ((int8_t)c >= 0 || (int8_t)g_prev_rx_byte >= 0) {
-            g_relay_state = 0;
+            g_relay_state = RELAY_IDLE;
             break;
         }
 
@@ -109,10 +109,10 @@ uint8_t protocol_task(void)
         if (g_relay_hdr0 & 0x10) {
             /* Данные: сразу выдаём заголовок с длиной, увеличенной на наши */
             mts_send_header(g_relay_hdr0, (uint16_t)(g_relay_len + 4));
-            g_relay_state = 2;
+            g_relay_state = RELAY_BODY;
         } else {
             /* Ответ на команду - надо ещё разобрать слово команды. */
-            g_relay_state = 4;
+            g_relay_state = RELAY_CMD_HI;
         }
         break;
 
@@ -120,7 +120,7 @@ uint8_t protocol_task(void)
      * ==================================================================
      * ==================================================================
      */
-    case 2:
+    case RELAY_BODY:
         g_relay_len--;
         uart_putchar(1, c);
 
@@ -145,7 +145,7 @@ uint8_t protocol_task(void)
             break;
         }
 
-        g_relay_state  = 0;
+        g_relay_state  = RELAY_IDLE;
         g_prev_rx_byte = c;
         return 1;
 
@@ -153,13 +153,13 @@ uint8_t protocol_task(void)
      * ==================================================================
      * ==================================================================
      */
-    case 3:
+    case RELAY_BODY_ISP1:
         g_relay_len--;
 
         /* Байт с битом7 внутри тела означает, что кадр оборвался и начался */
         if ((int8_t)c < 0) {
             g_relay_len   = 0;
-            g_relay_state = 0;
+            g_relay_state = RELAY_IDLE;
             break;
         }
 
@@ -176,9 +176,9 @@ uint8_t protocol_task(void)
          */
         if (g_behind_lm1 < 3) {
             g_behind_lm1++;
-            g_relay_state = 0;
+            g_relay_state = RELAY_IDLE;
         } else {
-            g_relay_state = 2;
+            g_relay_state = RELAY_BODY;
         }
         break;
 
@@ -191,17 +191,17 @@ uint8_t protocol_task(void)
      * Здесь берётся только бит7 кода команды.
      * ==================================================================
      */
-    case 4:
+    case RELAY_CMD_HI:
         g_relay_len--;
         g_relay_cmd   = (uint8_t)((c & 1) ? 0x80 : 0x00);
-        g_relay_state = 5;
+        g_relay_state = RELAY_CMD_LO;
         break;
 
     /*
      * ==================================================================
      * ==================================================================
      */
-    case 5: {
+    case RELAY_CMD_LO: {
         uint16_t len_before = g_relay_len;
 
         g_relay_len = (uint16_t)(len_before - 1);
@@ -218,10 +218,10 @@ uint8_t protocol_task(void)
          * чужими именами. Имя считается заданным, если первый его байт в
          */
         if (g_relay_cmd == 0xCE && eeprom_read_byte_lc1(1) != 0) {
-            g_relay_state = 6;
+            g_relay_state = RELAY_NAMES;
             g_name_dup    = 0;
         } else {
-            g_relay_state = 2;
+            g_relay_state = RELAY_BODY;
         }
         break;
     }
@@ -230,7 +230,7 @@ uint8_t protocol_task(void)
      * ==================================================================
      * ==================================================================
      */
-    case 6:
+    case RELAY_NAMES:
         g_relay_len--;
         uart_putchar(1, c);
 
@@ -263,7 +263,7 @@ uint8_t protocol_task(void)
         proto_send_ident(0, g_relay_cmd);
         eeprom_write_block_lc1(g_cfg_034F, 1, 8);
 
-        g_relay_state  = 0;
+        g_relay_state  = RELAY_IDLE;
         g_prev_rx_byte = c;
         return 1;
 

@@ -46,13 +46,13 @@ void heater_duty_update(int16_t vheat_eff, uint8_t mode)
 
     num = (int32_t)vheat_eff * 256;
 
-    if (mode == 0) {
+    if (mode == DUTY_BY_IHEAT) {
         if (vheat_eff == 0) {
             TCCR2 &= 0xCF; /* COM2 = 00, выход OC2 отключён */
             PORTB &= 0x7F; /* PB7 = 0, ключ закрыт          */
         }
         den = (int32_t)(int16_t)g_iheat_raw;
-    } else if (mode == 1) {
+    } else if (mode == DUTY_BY_VBAT) {
         den = (int32_t)(int16_t)g_vbat_scaled;
     } else {
         return;
@@ -97,7 +97,7 @@ uint8_t warmup_percent(void)
     if (p1000 >= 1000)
         p1000 = 999;
 
-    g_status       = 4;
+    g_status       = STATUS_WARMUP;
     g_report_value = (uint16_t)p1000;
 
     return (uint8_t)(p1000 / 10);
@@ -112,11 +112,11 @@ void heater_set_nominal(void)
     heater_pwm_set(1);
 
     if (g_sensor_type == SENSOR_LSU42)
-        heater_duty_update(1000, 1);
+        heater_duty_update(1000, DUTY_BY_VBAT);
     if (g_sensor_type == SENSOR_LSU49)
-        heater_duty_update(833, 1);
+        heater_duty_update(833, DUTY_BY_VBAT);
     if (g_sensor_type == SENSOR_NTK)
-        heater_duty_update(2150, 0);
+        heater_duty_update(2150, DUTY_BY_IHEAT);
 }
 
 /*

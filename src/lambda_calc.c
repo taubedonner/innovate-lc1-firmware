@@ -67,7 +67,7 @@ void lambda_update(void)
         }
     }
 
-    report_value_out(out, 1);
+    report_value_out(out, AOUT_ACC);
 
     /*
      * ================= Усреднение для протокола ======================= *
@@ -93,7 +93,7 @@ void lambda_update(void)
         cnt = (uint16_t)(g_cnt_o2 + 1);
 
         if (g_air_cal_request != 0)
-            g_status = 1;
+            g_status = STATUS_O2;
 
         {
             int32_t avg = g_acc_o2 / (int32_t)(int16_t)cnt;
@@ -127,7 +127,7 @@ void lambda_update(void)
         cnt = (uint16_t)(g_cnt_lambda + 1);
 
         if (g_air_cal_request != 0)
-            g_status = 0;
+            g_status = STATUS_LAMBDA;
 
         g_report_value = (uint16_t)(g_acc_lambda / (int32_t)(int16_t)cnt);
         g_report_value &= 0x1FFF;

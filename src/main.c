@@ -65,14 +65,14 @@ int main(void)
     }
 
     g_var_037F       = 5;
-    g_status         = 4; /* "прогрев" */
+    g_status         = STATUS_WARMUP; /* "прогрев" */
     g_report_value   = 0;
     g_uptime_20ms    = 0;
     g_var_0243       = 100;
     g_lambda         = 999.0f;
     g_var_0241       = 0;
     g_ticks_since_ac = 0;
-    g_state          = 0;
+    g_state          = ST_RESET;
     g_var_0252       = 0;
     g_error_latched  = 0;
 
@@ -105,10 +105,10 @@ int main(void)
         protocol_task();
         command_task();
 
-        if (g_error_code == 0)
+        if (g_error_code == ERR_NONE)
             g_error_code = state_machine_step();
 
-        if (g_error_code == 0 && g_state == 8) {
+        if (g_error_code == ERR_NONE && g_state == ST_RUN) {
             /* Первый вход в рабочий режим - подтянуть калибровку воздуха */
             if (g_var_0252 == 0) {
                 g_air_cal_request = load_air_cal();
@@ -124,7 +124,7 @@ int main(void)
 
             if (g_cal_btn_count == 0 && g_cal_btn_latched != 0) {
                 g_cal_btn_latched = 0;
-                if (g_status == 0 || g_status == 1) {
+                if (g_status == STATUS_LAMBDA || g_status == STATUS_O2) {
                     if (g_var_0223 == 0 && g_var_0317 == 0)
                         g_air_cal_request = 1;
                 }
@@ -149,7 +149,7 @@ int main(void)
                     g_var_03AE       = 0;
                     g_cnt_lambda     = 1;
                     g_cnt_o2         = 0;
-                    report_value_out(500, 0);
+                    report_value_out(500, AOUT_NOW);
                 } else if (g_ac_settled == 0) {
                     if (ACSR & (1 << ACO)) {
                         PORTA &= 0xF5;
@@ -166,14 +166,14 @@ int main(void)
                     PORTA &= ~(1 << P_AC_CENT_ENABLE);
                 } else {
                     /* Попытка уже была и не помогла - "sensor timing". */
-                    g_error_code = 8;
+                    g_error_code = ERR_SENSOR_TIMING;
                 }
             }
         }
 
         error_task();
 
-        if (g_state == 8 && g_test_mode != 0 && g_var_0231 >= 25) {
+        if (g_state == ST_RUN && g_test_mode != 0 && g_var_0231 >= 25) {
             g_var_022F = (uint16_t)(g_var_022F / g_var_0231);
             eeprom_write_byte_lc1(0, 0xFF);
             fatal_halt((g_var_022F >= 200) ? 1 : 0);

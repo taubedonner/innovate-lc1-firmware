@@ -60,39 +60,39 @@ void command_task(void)
      * ==================================================================
      */
     switch (st) {
-    case 2: /* имя совпало с "LM-1"   */
-    case 3: /* имя совпало с нашим    */
-        if (g_relay_state != 0)
+    case CMD_ANSWER_LISTEN_LM1:  /* имя совпало с "LM-1"   */
+    case CMD_ANSWER_LISTEN_SELF: /* имя совпало с нашим    */
+        if (g_relay_state != RELAY_IDLE)
             return;
 
-        g_listen_role = (st == 3) ? 1 : 2;
+        g_listen_role = (st == CMD_ANSWER_LISTEN_SELF) ? 1 : 2;
 
         /* Ответ - эхо самой команды Listen, spec sec.4.4. code:0358..035d */
         mts_send_response_hdr(0xA2, 2, 0xCC);
 
         /* Отозвались собственным именем - переходим в сервисный режим. */
         if (g_listen_role == 1)
-            g_cmd_state = 6;
+            g_cmd_state = CMD_SERVICE;
         break;
 
-    case 4: /* надо ответить на Typelist */
-        if (g_relay_state != 0)
+    case CMD_ANSWER_TYPELIST: /* надо ответить на Typelist */
+        if (g_relay_state != RELAY_IDLE)
             return;
 
         dbg_puts_P(s_typelist);
         mts_send_response_hdr(0xA2, 2, 0xF3);
         proto_send_ident(g_behind_lm1, 0xF3);
-        g_cmd_state = 0;
+        g_cmd_state = CMD_IDLE;
         break;
 
-    case 5: /* надо ответить на Namelist */
-        if (g_relay_state != 0)
+    case CMD_ANSWER_NAMELIST: /* надо ответить на Namelist */
+        if (g_relay_state != RELAY_IDLE)
             return;
 
         dbg_puts_P(s_namelist);
         mts_send_response_hdr(0xA2, 2, 0xCE);
         proto_send_ident(g_behind_lm1, 0xCE);
-        g_cmd_state = 0;
+        g_cmd_state = CMD_IDLE;
         break;
 
     default:
@@ -111,7 +111,7 @@ void command_task(void)
      * четыре раза чаще эталонного LM-1. Проверить осциллографом.
      * ==================================================================
      */
-    if (g_cmd_state == 0) {
+    if (g_cmd_state == CMD_IDLE) {
         if (g_is_chain_head != 0 && g_tick_flag_proto != 0) {
             if (g_test_mode == 0) {
                 mts_send_header(0xB2, 4);
@@ -138,11 +138,11 @@ void command_task(void)
     dbg_putc('\r');
 
     switch (g_cmd_state) {
-    case 0:
+    case CMD_IDLE:
         switch (c) {
         case 0xCC: /* Listen, spec sec.4.4 */
 
-            g_cmd_state = 1;
+            g_cmd_state = CMD_RX_NAME;
             g_name_idx  = 0;
             break;
 
@@ -157,7 +157,7 @@ void command_task(void)
              */
             if (g_is_chain_head != 0 || g_listen_role == 1) {
                 service_command(c);
-                g_cmd_state = 6;
+                g_cmd_state = CMD_SERVICE;
             } else {
                 uart_putchar(0, 'S');
             }
@@ -173,7 +173,7 @@ void command_task(void)
         case 0xF3: /* Typelist, spec sec.4.7 */
             /* Отвечает голова цепочки; прибор за LM-1 отвечает и за него. */
             if (g_is_chain_head != 0 || g_behind_lm1 != 0)
-                g_cmd_state = (c == 0xF3) ? 4 : 5;
+                g_cmd_state = (c == 0xF3) ? CMD_ANSWER_TYPELIST : CMD_ANSWER_NAMELIST;
             else
                 uart_putchar(0, c);
             break;
@@ -184,7 +184,7 @@ void command_task(void)
         }
         break;
 
-    case 1:
+    case CMD_RX_NAME:
         g_name_rx[g_name_idx] = c;
         g_name_idx++;
 
@@ -192,14 +192,14 @@ void command_task(void)
             break;
 
         if (name_matches_ram(g_cfg_034F)) {
-            g_cmd_state = 3;
+            g_cmd_state = CMD_ANSWER_LISTEN_SELF;
         } else if (g_behind_lm1 != 0) {
             /*
              * spec sec.4.4: на имя "LM-1" отвечает прибор, стоящий сразу за
              * ним. Образец - та же константа, что уходит в ответе.
              */
             if (name_matches_flash((const char*)0x008C))
-                g_cmd_state = 2;
+                g_cmd_state = CMD_ANSWER_LISTEN_LM1;
             /*
              * иначе имя чужое и НЕ наше: оригинал просто выходит, вверх
              * по цепочке команду не передаёт. Похоже на недосмотр -
@@ -212,14 +212,14 @@ void command_task(void)
                 for (i = 0; i < 8; i++)
                     uart_putchar(0, g_name_rx[i]);
             }
-            g_cmd_state = 0;
+            g_cmd_state = CMD_IDLE;
         }
         break;
 
-    case 6:
+    case CMD_SERVICE:
         if (c == 0xEC) { /* Unlisten - выходим */
             proto_flush_ack();
-            g_cmd_state = 0;
+            g_cmd_state = CMD_IDLE;
         } else {
             service_command(c);
         }

@@ -15,13 +15,13 @@ void error_task(void)
     uint8_t err;
     uint8_t n;
 
-    if (g_error_code == 0) {
+    if (g_error_code == ERR_NONE) {
         g_error_latched = 0;
         return;
     }
 
     /* В сервисном режиме любая ошибка, кроме "нет нагревателя", фатальна. */
-    if (g_test_mode != 0 && g_error_code != 2)
+    if (g_test_mode != 0 && g_error_code != ERR_NO_HEAT_CURR)
         fatal_halt(1);
 
     if (g_error_latched == 0) {
@@ -31,37 +31,37 @@ void error_task(void)
          */
         (void)g_error_code;
         meas_shutdown();
-        report_value_out(0, 3);
+        report_value_out(0, AOUT_ERROR);
 
         while (g_spi_state != 0)
             ;
 
         g_error_latched = g_error_code;
         g_err2_cycles   = 0;
-        g_status        = 6;
+        g_status        = STATUS_ERROR;
 
         /* Код ошибки уходит в поле значения пакета со знаковым */
         g_report_value = (uint16_t)(int16_t)(int8_t)g_error_code;
 
         err = g_error_code;
-        if (err == 9 || err < 2) {
+        if (err == ERR_VBAT_LOW || err < ERR_NO_HEAT_CURR) {
             heater_set_nominal();
 
-            if (g_error_code < 2) {
+            if (g_error_code < ERR_NO_HEAT_CURR) {
                 n = g_retry_lo_r;
                 if (n < 4) {
-                    g_error_code = 0;
-                    g_state      = 0;
+                    g_error_code = ERR_NONE;
+                    g_state      = ST_RESET;
                     g_retry_lo_r = (uint8_t)(n + 1);
                 }
             }
-        } else if (g_error_code == 6 || g_error_code == 4) {
+        } else if (g_error_code == ERR_NERNST_OPEN || g_error_code == ERR_PUMP_OPEN) {
             heater_set_nominal();
 
             n = g_retry_misc;
             if (n < 4) {
-                g_error_code = 0;
-                g_state      = 0;
+                g_error_code = ERR_NONE;
+                g_state      = ST_RESET;
                 g_retry_misc = (uint8_t)(n + 1);
             }
         }
@@ -70,21 +70,21 @@ void error_task(void)
     /* Периодическая перепроверка причины для "повторяемых" ошибок. */
     err = g_error_code;
 
-    if (err == 9) {
+    if (err == ERR_VBAT_LOW) {
         if (g_adc_data_ready == 0)
             return;
 
         g_adc_data_ready = 0;
         g_error_code     = heater_resistance_step();
 
-        if (g_error_code == 0)
+        if (g_error_code == ERR_NONE)
             g_error_latched = 0;
 
-        g_state = 0;
+        g_state = ST_RESET;
         return;
     }
 
-    if (err != 2)
+    if (err != ERR_NO_HEAT_CURR)
         return;
 
     /* ---------------- ошибка 2: нагреватель не отвечает ---------------- */
@@ -94,13 +94,13 @@ void error_task(void)
     g_adc_data_ready = 0;
     g_error_code     = heater_resistance_step();
 
-    if (g_error_code != 2) {
-        g_state = 0;
+    if (g_error_code != ERR_NO_HEAT_CURR) {
+        g_state = ST_RESET;
         return;
     }
 
-    if (g_cmd_state == 6) {
-        g_state = 0;
+    if (g_cmd_state == CMD_SERVICE) {
+        g_state = ST_RESET;
         return;
     }
 

@@ -66,5 +66,5 @@ void heater_rheat_regulate(void)
     if (u >= VHEAT_NOMINAL + 1)
         u = VHEAT_NOMINAL;
 
-    heater_duty_update((int16_t)(VHEAT_NOMINAL - u), 1);
+    heater_duty_update((int16_t)(VHEAT_NOMINAL - u), DUTY_BY_VBAT);
 }

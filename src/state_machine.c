@@ -12,17 +12,17 @@ uint8_t state_machine_step(void)
     if (g_var_0100 != g_state)
         g_var_0100 = g_state;
 
-    if (g_cmd_state == 6) {
-        if (g_state != 0)
+    if (g_cmd_state == CMD_SERVICE) {
+        if (g_state != ST_RESET)
             meas_shutdown();
-        g_state = 0;
+        g_state = ST_RESET;
         return 0;
     }
 
     switch (g_state) {
-    case 0:
+    case ST_RESET:
         g_var_0218 = 0;
-        report_value_out(0, 2);
+        report_value_out(0, AOUT_WARMUP);
         while (g_spi_state != 0)
             ;
         g_var_0217 = 0;
@@ -50,16 +50,16 @@ uint8_t state_machine_step(void)
         }
 
         g_adc_data_ready = 0;
-        g_state          = 1;
+        g_state          = ST_WAIT_ADC;
         /* провал в состояние 1 - так в ASM (нет rjmp) */
 
-    case 1:
+    case ST_WAIT_ADC:
         if (g_adc_data_ready == 0)
             return 0;
         g_adc_data_ready  = 0;
         g_rheat_cold_mohm = 0;
         g_cal_sample_cnt  = 0;
-        g_state           = 2;
+        g_state           = ST_RAMP;
         /* провал в состояние 2 */
 
     /*
@@ -67,9 +67,9 @@ uint8_t state_machine_step(void)
      * Две скорости нарастания: быстрая до порога, дальше медленная -
      * это "участок с высокой ramprate" и "участок 0.4 В/с" из описания.
      */
-    case 2:
+    case ST_RAMP:
         if (g_sensor_type == SENSOR_NTK) {
-            heater_duty_update((int16_t)g_vheat_ramp, 0);
+            heater_duty_update((int16_t)g_vheat_ramp, DUTY_BY_IHEAT);
             if (g_vheat_ramp < 144) {
                 g_vheat_ramp++;
             } else if (g_var_02F5 < 75) {
@@ -78,23 +78,23 @@ uint8_t state_machine_step(void)
             }
         }
         if (g_sensor_type == SENSOR_LSU42) {
-            heater_duty_update((int16_t)g_vheat_ramp, 1);
+            heater_duty_update((int16_t)g_vheat_ramp, DUTY_BY_VBAT);
             if (g_vheat_ramp < 1433)
                 g_vheat_ramp += 100;
             else if (g_vheat_ramp < 2660)
                 g_vheat_ramp += 6;
         }
         if (g_sensor_type == SENSOR_LSU49) {
-            heater_duty_update((int16_t)g_vheat_ramp, 1);
+            heater_duty_update((int16_t)g_vheat_ramp, DUTY_BY_VBAT);
             if (g_vheat_ramp < 1433)
                 g_vheat_ramp += 100;
             else if (g_vheat_ramp < 2660)
                 g_vheat_ramp += 6;
         }
-        g_state = 3;
+        g_state = ST_WARMUP;
         /* провал в состояние 3 */
 
-    case 3:
+    case ST_WARMUP:
         if (g_adc_data_ready == 0)
             return 0;
         g_adc_data_ready = 0;
@@ -109,9 +109,9 @@ uint8_t state_machine_step(void)
         dbg_printf_P((const char*)0x00C6, g_var_02F5);
         delay_ms(2);
 
-        if (err != 0) {
-            heater_duty_update(0, 0);
-            g_state = 0;
+        if (err != ERR_NONE) {
+            heater_duty_update(0, DUTY_BY_IHEAT);
+            g_state = ST_RESET;
             return err;
         }
 
@@ -129,8 +129,8 @@ uint8_t state_machine_step(void)
                      * Воспроизведено как есть.
                      */
                     if (cell_measure((uint8_t)rn) != 0) {
-                        heater_duty_update(1000, 1);
-                        g_state = 4;
+                        heater_duty_update(1000, DUTY_BY_VBAT);
+                        g_state = ST_CELL_CHECK;
                         return 0;
                     }
                 }
@@ -143,8 +143,8 @@ uint8_t state_machine_step(void)
                      * в "rn < 201".
                      */
                     if (cell_measure(CELL_MEAS_ACO) != 0) {
-                        heater_duty_update(833, 1);
-                        g_state = 4;
+                        heater_duty_update(833, DUTY_BY_VBAT);
+                        g_state = ST_CELL_CHECK;
                         return 0;
                     }
                 }
@@ -174,10 +174,10 @@ uint8_t state_machine_step(void)
             }
             g_cal_sample_cnt = 0;
         }
-        g_state = 2;
+        g_state = ST_RAMP;
         return 0;
 
-    case 4: {
+    case ST_CELL_CHECK: {
         int16_t limit;
         int16_t rp, rn;
 
@@ -192,83 +192,83 @@ uint8_t state_machine_step(void)
         rp            = cell_measure(CELL_MEAS_RPUMP);
         g_cell_r_meas = rp;
 
-        err = (rp < 18) ? 3 : 0;
+        err = (rp < 18) ? ERR_PUMP_SHORT : ERR_NONE;
         if (rp >= limit)
-            err = 4;
+            err = ERR_PUMP_OPEN;
 
         rn            = cell_measure(CELL_MEAS_RNERNST);
         g_rnernst_acc = rn;
 
         if (rn < 2)
-            err = 5;
+            err = ERR_NERNST_SHORT;
         if (rn >= 501)
-            err = 6;
+            err = ERR_NERNST_OPEN;
 
-        if (err != 0) {
-            heater_duty_update(0, 0);
-            g_state = 0;
+        if (err != ERR_NONE) {
+            heater_duty_update(0, DUTY_BY_IHEAT);
+            g_state = ST_RESET;
             return err;
         }
 
         if (g_sensor_type == SENSOR_NTK) {
-            g_state    = 10;
+            g_state    = ST_CELL_SHAKE;
             g_var_0217 = 0;
         } else {
             g_nominal_veff = (g_sensor_type == SENSOR_LSU49) ? 833 : 1000;
-            g_state        = 5;
+            g_state        = ST_CAL_CHECK;
         }
         return 0;
     }
 
-    case 5:
+    case ST_CAL_CHECK:
         g_adc_data_ready = 0;
 
         if (g_sensor_type == SENSOR_NTK) {
             if (eeprom_init_and_read_word(10) == 0) {
                 g_var_0212 = 0;
-                g_state    = 7;
+                g_state    = ST_HEATER_CAL_NTK;
             } else {
-                heater_duty_update(2150, 1);
-                g_state = 4;
+                heater_duty_update(2150, DUTY_BY_VBAT);
+                g_state = ST_CELL_CHECK;
             }
         } else {
             if (eeprom_init_and_read_word(0x16) == 0) {
                 g_heater_cal_active = 0;
-                g_state             = 6; /* нет targetRpump -> калибровать */
+                g_state             = ST_HEATER_CAL; /* нет targetRpump -> калибровать */
             } else {
                 /* Повторное чтение той же ячейки EEPROM - так в ASM */
                 g_heat_target = eeprom_init_and_read_word(0x16);
                 g_rpump_phase = 3;
-                g_state       = 10;
+                g_state       = ST_CELL_SHAKE;
                 g_var_0217    = 0;
             }
         }
         return 0;
 
-    case 6:
+    case ST_HEATER_CAL:
         err = heater_cal_step();
-        if (err != 0) {
-            g_state = 0;
+        if (err != ERR_NONE) {
+            g_state = ST_RESET;
             return err;
         }
         if (g_heater_cal_active != 0)
             return 0;
-        g_state = 5;
+        g_state = ST_CAL_CHECK;
         return 0;
 
-    case 7:
+    case ST_HEATER_CAL_NTK:
         err = ntk_heater_cal_step();
-        if (err != 0) {
-            g_state = 0;
+        if (err != ERR_NONE) {
+            g_state = ST_RESET;
             return err;
         }
         if (g_var_0212 != 0)
             return 0;
-        heater_duty_update(2150, 1);
-        g_state = 4;
+        heater_duty_update(2150, DUTY_BY_VBAT);
+        g_state = ST_CELL_CHECK;
         return 0;
 
-    case 8:
+    case ST_RUN:
         if (g_rpump_phase == 3) {
             g_rpump_phase++;
             if (g_sensor_type != SENSOR_NTK && g_cell_r_meas >= 11)
@@ -284,7 +284,7 @@ uint8_t state_machine_step(void)
         err = heater_resistance_step();
 
         /* Для NTK температура держится по сопротивлению нагревателя - */
-        if (err == 0 && g_sensor_type == SENSOR_NTK) {
+        if (err == ERR_NONE && g_sensor_type == SENSOR_NTK) {
             if ((int32_t)g_rheat_target_mohm != g_rheat_mohm)
                 heater_rheat_regulate();
         }
@@ -297,14 +297,14 @@ uint8_t state_machine_step(void)
             g_var_0217    = 0;
         }
 
-        if (err == 0)
+        if (err == ERR_NONE)
             return 0;
 
-        heater_duty_update(0, 0);
-        g_state = 0;
+        heater_duty_update(0, DUTY_BY_IHEAT);
+        g_state = ST_RESET;
         return err;
 
-    case 9:
+    case ST_CAL_RESET:
         g_var_0217 = 0;
         eeprom_init_and_read_word(10);
 
@@ -315,13 +315,13 @@ uint8_t state_machine_step(void)
 
         if (g_sensor_type == SENSOR_NTK) {
             eeprom_store_word(10, 0);
-            g_state = 5;
+            g_state = ST_CAL_CHECK;
         } else {
             eeprom_store_word(0x16, 0);
-            g_state = 4;
+            g_state = ST_CELL_CHECK;
         }
 
-        heater_duty_update(g_pid_out, 1);
+        heater_duty_update(g_pid_out, DUTY_BY_VBAT);
         return 0;
 
     /*
@@ -329,7 +329,7 @@ uint8_t state_machine_step(void)
      * Серия симметричных импульсов тока накачки с "центрированием"
      * AC-связи. Компаратор на это время выключен (ACSR = 0).
      */
-    case 10:
+    case ST_CELL_SHAKE:
         ACSR = 0;
         DDRA |= (1 << P_DIR_CONTROL) | (1 << P_VN_HYST);
 
@@ -351,7 +351,7 @@ uint8_t state_machine_step(void)
 
         g_var_0217++;
         if (g_var_0217 >= 50) {
-            g_state    = 11;
+            g_state    = ST_AC_SYNC;
             g_var_0217 = 0;
         }
 
@@ -365,7 +365,7 @@ uint8_t state_machine_step(void)
      * Направление тока приводится в противофазу с состоянием компаратора,
      * чтобы автоколебания запустились с правильной фазы.
      */
-    case 11:
+    case ST_AC_SYNC:
         DDRA |= (1 << P_DIR_CONTROL);
 
         if ((ACSR & (1 << ACO)) && (PORTA & (1 << P_DIR_CONTROL))) {
@@ -396,7 +396,7 @@ uint8_t state_machine_step(void)
         DDRA &= 0xF5;
         g_ticks_since_ac = 0;
         g_var_0243       = 100;
-        g_state          = 8;
+        g_state          = ST_RUN;
         return 0;
 
     default:
